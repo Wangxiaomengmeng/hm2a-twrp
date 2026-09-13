@@ -77,8 +77,6 @@ jobs:
       - name: Fetch missing mksh source
         run: |
           cd ~/twrp
-          # minimal-manifest 删掉了 mksh，但 TWRP 4.4 的 sh 需要它
-          # 依次尝试多个可用的镜像源
           MIRRORS=(
             "https://github.com/CyanogenMod/android_external_mksh.git"
             "https://android.googlesource.com/platform/external/mksh"
@@ -100,7 +98,18 @@ jobs:
             exit 1
           fi
           ls -la external/mksh/
-          head -20 external/mksh/Android.mk
+
+      - name: Patch mksh module name
+        run: |
+          cd ~/twrp
+          echo "===== Before ====="
+          grep -n "LOCAL_MODULE" external/mksh/Android.mk
+          # 新 mksh 的 Android.mk 里 LOCAL_MODULE 可能是 sh，
+          # TWRP 4.4 期望 mksh
+          sed -i 's/^LOCAL_MODULE := sh/LOCAL_MODULE := mksh/' external/mksh/Android.mk
+          sed -i 's/^LOCAL_MODULE:=sh/LOCAL_MODULE := mksh/' external/mksh/Android.mk
+          echo "===== After ====="
+          grep -n "LOCAL_MODULE" external/mksh/Android.mk
 
       - name: Drop in device tree and kernel
         run: |
