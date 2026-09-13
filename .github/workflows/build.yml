@@ -80,6 +80,20 @@ jobs:
           mkdir -p device/leadcore/lte26007
           cp -r $GITHUB_WORKSPACE/src/device/leadcore/lte26007/* device/leadcore/lte26007/
 
+      - name: Patch AOSP 4.4 JDK checks
+        run: |
+          cd ~/twrp
+          # AOSP 4.4 的 main.mk 只认 Sun/Oracle JDK，会拒绝 OpenJDK
+          # 把 JDK 检查里的 $(error stop) 全部替换成无害的 $(info ...)
+          sed -i 's/\$(error stop)/\$(info JDK check bypassed)/g' build/core/main.mk
+          # 顺便确认替换成功
+          if grep -q "error stop" build/core/main.mk; then
+            echo "WARNING: some \$(error stop) still remain:"
+            grep -n "error stop" build/core/main.mk
+          else
+            echo "JDK checks disabled successfully"
+          fi
+
       - name: Build recovery
         run: |
           cd ~/twrp
