@@ -97,15 +97,12 @@ jobs:
             echo "All mirrors failed!"
             exit 1
           fi
-          ls -la external/mksh/
 
       - name: Patch mksh module name
         run: |
           cd ~/twrp
           echo "===== Before ====="
           grep -n "LOCAL_MODULE" external/mksh/Android.mk
-          # 新 mksh 的 Android.mk 里 LOCAL_MODULE 可能是 sh，
-          # TWRP 4.4 期望 mksh
           sed -i 's/^LOCAL_MODULE := sh/LOCAL_MODULE := mksh/' external/mksh/Android.mk
           sed -i 's/^LOCAL_MODULE:=sh/LOCAL_MODULE := mksh/' external/mksh/Android.mk
           echo "===== After ====="
@@ -127,6 +124,19 @@ jobs:
           else
             echo "JDK checks disabled successfully"
           fi
+
+      - name: Patch checkpolicy for modern GCC
+        run: |
+          cd ~/twrp
+          echo "===== Before ====="
+          cat external/checkpolicy/Android.mk
+          sed -i 's/^LOCAL_CFLAGS +=/LOCAL_CFLAGS += -fcommon/' external/checkpolicy/Android.mk
+          sed -i 's/^LOCAL_CFLAGS :=/LOCAL_CFLAGS := -fcommon/' external/checkpolicy/Android.mk
+          if ! grep -q "LOCAL_CFLAGS" external/checkpolicy/Android.mk; then
+            sed -i '/^LOCAL_MODULE/a LOCAL_CFLAGS := -fcommon' external/checkpolicy/Android.mk
+          fi
+          echo "===== After ====="
+          cat external/checkpolicy/Android.mk
 
       - name: Build recovery
         run: |
