@@ -31,16 +31,20 @@ jobs:
           echo "After:"
           df -h
 
-      - name: Setup Python 2.7 (for old Android build)
-        uses: actions/setup-python@v4
-        with:
-          python-version: '2.7'
-
       - name: Setup JDK 8 (for old Android build)
         uses: actions/setup-java@v3
         with:
           distribution: 'zulu'
           java-version: '8'
+
+      - name: Install Python 2.7 (for old Android build)
+        run: |
+          # 手动添加 deadsnakes 源来安装 Python 2.7
+          sudo add-apt-repository -y ppa:deadsnakes/ppa
+          sudo apt-get update
+          sudo apt-get install -y python2.7
+          # 强制把系统的 python 命令指向 python2.7
+          sudo ln -sf /usr/bin/python2.7 /usr/bin/python
 
       - name: Install build deps
         run: |
