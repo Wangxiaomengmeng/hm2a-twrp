@@ -78,7 +78,27 @@ jobs:
         run: |
           cd ~/twrp
           # minimal-manifest 删掉了 mksh，但 TWRP 4.4 的 sh 需要它
-          git clone --depth=1 https://github.com/AOSP-mirror/platform_external_mksh.git external/mksh
+          # 依次尝试多个可用的镜像源
+          MIRRORS=(
+            "https://github.com/CyanogenMod/android_external_mksh.git"
+            "https://android.googlesource.com/platform/external/mksh"
+            "https://github.com/LineageOS/android_external_mksh.git"
+          )
+          SUCCESS=0
+          for m in "${MIRRORS[@]}"; do
+            echo "Trying $m ..."
+            if git clone --depth=1 "$m" external/mksh 2>/dev/null; then
+              SUCCESS=1
+              echo "Cloned successfully from $m"
+              break
+            else
+              rm -rf external/mksh
+            fi
+          done
+          if [ "$SUCCESS" != "1" ]; then
+            echo "All mirrors failed!"
+            exit 1
+          fi
           ls -la external/mksh/
           head -20 external/mksh/Android.mk
 
