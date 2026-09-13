@@ -80,6 +80,18 @@ jobs:
           mkdir -p device/leadcore/lte26007
           cp -r $GITHUB_WORKSPACE/src/device/leadcore/lte26007/* device/leadcore/lte26007/
 
+      - name: Patch libselinux pcre linking
+        run: |
+          cd ~/twrp
+          echo "===== Before ====="
+          grep -n "libpcre" external/libselinux/Android.mk
+          # 5.1 host static library 的 LOCAL_WHOLE_STATIC_LIBRARIES 有路径拼接 bug
+          # 改成普通静态链接绕过
+          sed -i 's/LOCAL_WHOLE_STATIC_LIBRARIES := libpcre/LOCAL_STATIC_LIBRARIES := libpcre/g' external/libselinux/Android.mk
+          sed -i 's/LOCAL_WHOLE_STATIC_LIBRARIES += libpcre/LOCAL_STATIC_LIBRARIES += libpcre/g' external/libselinux/Android.mk
+          echo "===== After ====="
+          grep -n "libpcre" external/libselinux/Android.mk
+
       - name: Build recovery
         run: |
           cd ~/twrp
