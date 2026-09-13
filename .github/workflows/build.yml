@@ -74,6 +74,14 @@ jobs:
           repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-4.4-deprecated
           repo sync -c --no-clone-bundle --no-tags -j$(nproc)
 
+      - name: Fetch missing mksh source
+        run: |
+          cd ~/twrp
+          # minimal-manifest 删掉了 mksh，但 TWRP 4.4 的 sh 需要它
+          git clone --depth=1 https://github.com/AOSP-mirror/platform_external_mksh.git external/mksh
+          ls -la external/mksh/
+          head -20 external/mksh/Android.mk
+
       - name: Drop in device tree and kernel
         run: |
           cd ~/twrp
@@ -83,10 +91,7 @@ jobs:
       - name: Patch AOSP 4.4 JDK checks
         run: |
           cd ~/twrp
-          # AOSP 4.4 的 main.mk 只认 Sun/Oracle JDK，会拒绝 OpenJDK
-          # 把 JDK 检查里的 $(error stop) 全部替换成无害的 $(info ...)
           sed -i 's/\$(error stop)/\$(info JDK check bypassed)/g' build/core/main.mk
-          # 顺便确认替换成功
           if grep -q "error stop" build/core/main.mk; then
             echo "WARNING: some \$(error stop) still remain:"
             grep -n "error stop" build/core/main.mk
