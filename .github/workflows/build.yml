@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 350
 
     steps:
@@ -27,10 +27,20 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
           sudo rm -rf /usr/share/swift
           sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/local/lib/android/sdk/ndk
           sudo apt-get clean
           echo "After:"
           df -h
+
+      - name: Setup Python 2.7 (for old Android build)
+        uses: actions/setup-python@v4
+        with:
+          python-version: '2.7'
+
+      - name: Setup JDK 8 (for old Android build)
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '8'
 
       - name: Install build deps
         run: |
@@ -38,13 +48,7 @@ jobs:
           sudo apt-get install -y git-core gnupg flex bison build-essential \
             zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
             lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev \
-            libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig \
-            python2 openjdk-8-jdk
-            
-          # 强制把默认 python 和 java 指向老版本
-          sudo ln -sf /usr/bin/python2 /usr/bin/python
-          sudo update-alternatives --set java /usr/lib/jvm/java-8-openjdk-amd64/jre/bin/java
-          echo "JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> $GITHUB_ENV
+            libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig
 
       - name: Setup repo tool
         run: |
@@ -59,7 +63,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/twrp/.repo
-          key: twrp-6.0-repo-${{ hashFiles('src/BoardConfig.mk') }}
+          key: twrp-6.0-repo-${{ hashFiles('src/device/leadcore/lte26007/BoardConfig.mk') }}
 
       - name: Init and sync minimal manifest
         run: |
@@ -71,19 +75,9 @@ jobs:
         run: |
           cd ~/twrp
           mkdir -p device/leadcore/lte26007
-          # 注意：把你仓库里 src 下的设备树文件都拷进来
-          cp -r $GITHUB_WORKSPACE/src/device/leadcore/lte26007/* device/leadcore/lte26007/ 2>/dev/null || true
-          cp -r $GITHUB_WORKSPACE/src/android_device_leadcore_lte26007/* device/leadcore/lte26007/ 2>/dev/null || true
-          
-          # 如果你把内核源码也一起传上来了
-          if [ -d "$GITHUB_WORKSPACE/src/kernel_xiaomi_lte26007" ]; then
-            cp -r $GITHUB_WORKSPACE/src/kernel_xiaomi_lte26007 kernel_xiaomi_lte26007
-          fi
+          cp -r $GITHUB_WORKSPACE/src/device/leadcore/lte26007/* device/leadcore/lte26007/
 
       - name: Build recovery
-        env:
-          JAVA_HOME: /usr/lib/jvm/java-8-openjdk-amd64
-          LC_ALL: C
         run: |
           cd ~/twrp
           source build/envsetup.sh
@@ -99,7 +93,7 @@ jobs:
           ls -l $GITHUB_WORKSPACE/ramdisk_recovery.img
           echo "size = $(stat -c%s $GITHUB_WORKSPACE/ramdisk_recovery.img) bytes"
 
-      - name: Upload ramdisk + full recovery.img + build log
+      - name: Upload ramdisk + build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -107,5 +101,4 @@ jobs:
           path: |
             ramdisk_recovery.img
             /home/runner/twrp/out/target/product/lte26007/recovery.img
-            /home/runner/twrp/out/target/product/lte26007/recovery/root/
             /home/runner/twrp/build.log
