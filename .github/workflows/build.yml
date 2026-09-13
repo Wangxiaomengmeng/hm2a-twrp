@@ -31,11 +31,11 @@ jobs:
           echo "After:"
           df -h
 
-      - name: Setup JDK 8 (for old Android build)
+      - name: Setup JDK 7 (for Android 4.4 build)
         uses: actions/setup-java@v3
         with:
           distribution: 'zulu'
-          java-version: '8'
+          java-version: '7'
 
       - name: Install Python 2.7 (for old Android build)
         run: |
@@ -66,12 +66,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/twrp/.repo
-          key: twrp-4.4-repo-${{ hashFiles('src/device/leadcore/lte26007/BoardConfig.mk') }}
+          key: twrp-4.4-dep-repo-${{ hashFiles('src/device/leadcore/lte26007/BoardConfig.mk') }}
 
       - name: Init and sync minimal manifest
         run: |
           mkdir -p ~/twrp && cd ~/twrp
-          repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-4.4
+          repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-4.4-deprecated
           repo sync -c --no-clone-bundle --no-tags -j$(nproc)
 
       - name: Drop in device tree and kernel
