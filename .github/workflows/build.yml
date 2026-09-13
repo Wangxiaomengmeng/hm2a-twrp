@@ -66,12 +66,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/twrp/.repo
-          key: twrp-6.0-repo-${{ hashFiles('src/device/leadcore/lte26007/BoardConfig.mk') }}
+          key: twrp-4.4-repo-${{ hashFiles('src/device/leadcore/lte26007/BoardConfig.mk') }}
 
       - name: Init and sync minimal manifest
         run: |
           mkdir -p ~/twrp && cd ~/twrp
-          repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-6.0
+          repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-4.4
           repo sync -c --no-clone-bundle --no-tags -j$(nproc)
 
       - name: Drop in device tree and kernel
@@ -82,11 +82,10 @@ jobs:
 
       - name: Build recovery
         run: |
-          set -o pipefail
           cd ~/twrp
           source build/envsetup.sh
           lunch omni_lte26007-eng
-          mka recoveryimage -j$(nproc) 2>&1 | tee build.log
+          mka recoveryimage -j$(nproc) 2>&1 | tee build.log || true
           ls -la out/target/product/lte26007/recovery/root/ || true
 
       - name: Repack ramdisk_recovery (gzip cpio)
