@@ -31,13 +31,13 @@ jobs:
           echo "After:"
           df -h
 
-      - name: Setup JDK 7 (for Android 4.4 build)
+      - name: Setup JDK 8
         uses: actions/setup-java@v3
         with:
           distribution: 'zulu'
-          java-version: '7'
+          java-version: '8'
 
-      - name: Install Python 2.7 (for old Android build)
+      - name: Install Python 2.7
         run: |
           sudo add-apt-repository -y ppa:deadsnakes/ppa
           sudo apt-get update
@@ -66,77 +66,19 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/twrp/.repo
-          key: twrp-4.4-dep-repo-${{ hashFiles('src/device/leadcore/lte26007/BoardConfig.mk') }}
+          key: twrp-5.1-repo-${{ hashFiles('src/device/leadcore/lte26007/BoardConfig.mk') }}
 
       - name: Init and sync minimal manifest
         run: |
           mkdir -p ~/twrp && cd ~/twrp
-          repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-4.4-deprecated
+          repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-5.1
           repo sync -c --no-clone-bundle --no-tags -j$(nproc)
-
-      - name: Fetch missing mksh source
-        run: |
-          cd ~/twrp
-          MIRRORS=(
-            "https://github.com/CyanogenMod/android_external_mksh.git"
-            "https://android.googlesource.com/platform/external/mksh"
-            "https://github.com/LineageOS/android_external_mksh.git"
-          )
-          SUCCESS=0
-          for m in "${MIRRORS[@]}"; do
-            echo "Trying $m ..."
-            if git clone --depth=1 "$m" external/mksh 2>/dev/null; then
-              SUCCESS=1
-              echo "Cloned successfully from $m"
-              break
-            else
-              rm -rf external/mksh
-            fi
-          done
-          if [ "$SUCCESS" != "1" ]; then
-            echo "All mirrors failed!"
-            exit 1
-          fi
-
-      - name: Patch mksh module name
-        run: |
-          cd ~/twrp
-          echo "===== Before ====="
-          grep -n "LOCAL_MODULE" external/mksh/Android.mk
-          sed -i 's/^LOCAL_MODULE := sh/LOCAL_MODULE := mksh/' external/mksh/Android.mk
-          sed -i 's/^LOCAL_MODULE:=sh/LOCAL_MODULE := mksh/' external/mksh/Android.mk
-          echo "===== After ====="
-          grep -n "LOCAL_MODULE" external/mksh/Android.mk
 
       - name: Drop in device tree and kernel
         run: |
           cd ~/twrp
           mkdir -p device/leadcore/lte26007
           cp -r $GITHUB_WORKSPACE/src/device/leadcore/lte26007/* device/leadcore/lte26007/
-
-      - name: Patch AOSP 4.4 JDK checks
-        run: |
-          cd ~/twrp
-          sed -i 's/\$(error stop)/\$(info JDK check bypassed)/g' build/core/main.mk
-          if grep -q "error stop" build/core/main.mk; then
-            echo "WARNING: some \$(error stop) still remain:"
-            grep -n "error stop" build/core/main.mk
-          else
-            echo "JDK checks disabled successfully"
-          fi
-
-      - name: Patch checkpolicy for modern GCC
-        run: |
-          cd ~/twrp
-          echo "===== Before ====="
-          cat external/checkpolicy/Android.mk
-          sed -i 's/^LOCAL_CFLAGS +=/LOCAL_CFLAGS += -fcommon/' external/checkpolicy/Android.mk
-          sed -i 's/^LOCAL_CFLAGS :=/LOCAL_CFLAGS := -fcommon/' external/checkpolicy/Android.mk
-          if ! grep -q "LOCAL_CFLAGS" external/checkpolicy/Android.mk; then
-            sed -i '/^LOCAL_MODULE/a LOCAL_CFLAGS := -fcommon' external/checkpolicy/Android.mk
-          fi
-          echo "===== After ====="
-          cat external/checkpolicy/Android.mk
 
       - name: Build recovery
         run: |
