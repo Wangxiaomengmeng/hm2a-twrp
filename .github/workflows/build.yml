@@ -82,7 +82,7 @@ jobs:
           mkdir -p device/leadcore/lte26007
           cp -r $GITHUB_WORKSPACE/src/device/leadcore/lte26007/* device/leadcore/lte26007/
 
-      - name: Fix libpcre (only host block in libselinux, keep target block)
+      - name: Fix libpcre (only host block in libselinux)
         run: |
           cd ~/twrp
           FILE=external/libselinux/Android.mk
@@ -114,23 +114,24 @@ jobs:
             sed -i '/^LOCAL_MODULE/a LOCAL_CFLAGS := -fcommon' external/checkpolicy/Android.mk
           fi
 
-      - name: Patch recovery to use C++11
+      - name: Patch recovery to use C++11 (C++ only)
         run: |
           cd ~/twrp
-          echo "===== bootable/recovery/Android.mk (before) ====="
-          grep -n "LOCAL_CFLAGS\|LOCAL_CPPFLAGS\|LOCAL_C_INCLUDES\|LOCAL_MODULE := recovery" bootable/recovery/Android.mk || true
-          # TWRP 5.1 源码用了 C++11 的 nullptr / auto，但 Android 5.1 默认 gnu++98
-          # 给 recovery 加上 -std=gnu++11
+
+          # 1) 把 recovery 模块里唯一的 .c 文件改名为 .cpp（避免 -std=gnu++11 应用于 C）
+          if [ -f bootable/recovery/tarWrite.c ]; then
+            mv bootable/recovery/tarWrite.c bootable/recovery/tarWrite.cpp
+            sed -i 's/tarWrite\.c/tarWrite.cpp/g' bootable/recovery/Android.mk
+            echo "Renamed tarWrite.c -> tarWrite.cpp"
+          fi
+
+          # 2) 只给 C++ 加 -std=gnu++11，不动 C
           if ! grep -q "std=gnu++11" bootable/recovery/Android.mk; then
-            sed -i '/^LOCAL_MODULE := recovery/a LOCAL_CFLAGS += -std=gnu++11\nLOCAL_CPPFLAGS += -std=gnu++11' bootable/recovery/Android.mk
+            sed -i '/^LOCAL_MODULE := recovery/a LOCAL_CPPFLAGS += -std=gnu++11' bootable/recovery/Android.mk
           fi
-          # 保险：把全局 CFLAGS 加上 std=gnu++11（只影响 C++ 编译）
-          if [ -f build/core/combo/TARGET_linux-arm.mk ]; then
-            grep -q "std=gnu++11" build/core/combo/TARGET_linux-arm.mk || \
-              sed -i 's|^TARGET_GLOBAL_CFLAGS +=|TARGET_GLOBAL_CFLAGS += -std=gnu++11|' build/core/combo/TARGET_linux-arm.mk
-          fi
-          echo "===== bootable/recovery/Android.mk (after) ====="
-          grep -n "std=gnu++11" bootable/recovery/Android.mk || true
+
+          echo "===== bootable/recovery/Android.mk (final) ====="
+          grep -n "tarWrite\|std=gnu++11\|LOCAL_MODULE := recovery" bootable/recovery/Android.mk || true
 
       - name: Build recovery
         run: |
