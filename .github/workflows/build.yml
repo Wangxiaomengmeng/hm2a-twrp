@@ -80,29 +80,39 @@ jobs:
           mkdir -p device/leadcore/lte26007
           cp -r $GITHUB_WORKSPACE/src/device/leadcore/lte26007/* device/leadcore/lte26007/
 
-      - name: Patch libselinux pcre linking
+      - name: Fix libselinux / pcre linking
         run: |
           cd ~/twrp
-          echo "===== Before ====="
-          grep -n "libpcre" external/libselinux/Android.mk || true
+          # 1. libselinux 里 WHOLE static 改成普通 static（避免路径拼接 bug）
           sed -i 's/LOCAL_WHOLE_STATIC_LIBRARIES := libpcre/LOCAL_STATIC_LIBRARIES := libpcre/g' external/libselinux/Android.mk
           sed -i 's/LOCAL_WHOLE_STATIC_LIBRARIES += libpcre/LOCAL_STATIC_LIBRARIES += libpcre/g' external/libselinux/Android.mk
-          echo "===== After ====="
-          grep -n "libpcre" external/libselinux/Android.mk || true
+
+          # 2. 所有依赖 libselinux 的 host 工具补加 libpcre 依赖
+          for f in $(find external system bootable -name Android.mk 2>/dev/null); do
+            if grep -q "libselinux" "$f" && grep -q "BUILD_HOST_EXECUTABLE" "$f"; then
+              if ! grep -q "libpcre" "$f"; then
+                echo "Patching host tool: $f"
+                if grep -q "^LOCAL_STATIC_LIBRARIES" "$f"; then
+                  sed -i 's/^LOCAL_STATIC_LIBRARIES :=/LOCAL_STATIC_LIBRARIES := libpcre/' "$f"
+                else
+                  sed -i '/^LOCAL_MODULE :=/a LOCAL_STATIC_LIBRARIES := libpcre' "$f"
+                fi
+              fi
+            fi
+          done
+          echo "=========== Patched files ==========="
+          grep -rln "libpcre" --include=Android.mk external/ system/ bootable/ 2>/dev/null
 
       - name: Patch checkpolicy for modern GCC
         run: |
           cd ~/twrp
-          echo "===== Before ====="
-          cat external/checkpolicy/Android.mk
-          # 现代 GCC 默认 -fno-common，加回 -fcommon 避免 te_assertions 重复定义
           if grep -q "LOCAL_CFLAGS" external/checkpolicy/Android.mk; then
             sed -i 's/^LOCAL_CFLAGS +=/LOCAL_CFLAGS += -fcommon/' external/checkpolicy/Android.mk
             sed -i 's/^LOCAL_CFLAGS :=/LOCAL_CFLAGS := -fcommon/' external/checkpolicy/Android.mk
           else
             sed -i '/^LOCAL_MODULE/a LOCAL_CFLAGS := -fcommon' external/checkpolicy/Android.mk
           fi
-          echo "===== After ====="
+          echo "===== checkpolicy Android.mk ====="
           cat external/checkpolicy/Android.mk
 
       - name: Build recovery
