@@ -83,30 +83,50 @@ jobs:
           mkdir -p device/leadcore/lte26007
           cp -r $GITHUB_WORKSPACE/src/device/leadcore/lte26007/* device/leadcore/lte26007/
 
-      - name: Fix libpcre - use system libpcre for host tools
+      - name: Fix libpcre (only host block in libselinux, keep target block)
         run: |
           cd ~/twrp
 
-          # libselinux 主库：去掉对 AOSP libpcre 的依赖
+          # ========================================================
+          # 只改 libselinux 的 HOST 块，让 host 端不依赖 AOSP libpcre
+          # TARGET 块保持原样（init/adbd 需要 pcre 符号）
+          # ========================================================
           FILE=external/libselinux/Android.mk
-          sed -i 's/LOCAL_WHOLE_STATIC_LIBRARIES \(:=\|+=\) libpcre//g' $FILE
-          sed -i 's/LOCAL_STATIC_LIBRARIES \(:=\|+=\) libpcre//g' $FILE
+          echo "===== Original ====="
+          cat $FILE
 
-          # 所有 host 工具：加 -lpcre
+          HOST_BUILD_LINE=$(grep -n "BUILD_HOST_STATIC_LIBRARY" $FILE | head -1 | cut -d: -f1)
+          if [ -n "$HOST_BUILD_LINE" ]; then
+            HOST_START=$(head -n $HOST_BUILD_LINE $FILE | grep -n "include \$(CLEAR_VARS)" | tail -1 | cut -d: -f1)
+            echo "Host block: lines $HOST_START - $HOST_BUILD_LINE"
+            # 只在这一区间内替换 WHOLE -> 普通 static
+            sed -i "${HOST_START},${HOST_BUILD_LINE}s/LOCAL_WHOLE_STATIC_LIBRARIES \(:=\|+=\) libpcre/LOCAL_STATIC_LIBRARIES \1 libpcre/" $FILE
+          fi
+
+          echo "===== After ====="
+          cat $FILE
+
+          # ========================================================
+          # host 工具（checkfc/checkseapp 等）：加系统 -lpcre
+          # ========================================================
           for f in $(grep -rl "BUILD_HOST_EXECUTABLE" --include=Android.mk . | grep -v "^./out"); do
-            if grep -q "libselinux\|libpcre" "$f"; then
-              sed -i '/LOCAL_STATIC_LIBRARIES.*libpcre/d' "$f"
-              sed -i '/LOCAL_WHOLE_STATIC_LIBRARIES.*libpcre/d' "$f"
+            if grep -q "libselinux" "$f"; then
               if ! grep -q "LOCAL_LDLIBS.*lpcre" "$f"; then
-                sed -i '/include \$(BUILD_HOST_EXECUTABLE)/i LOCAL_LDLIBS := -lpcre' "$f"
+                sed -i '/include \$(BUILD_HOST_EXECUTABLE)/i LOCAL_LDLIBS += -lpcre' "$f"
               fi
             fi
           done
 
-          # 兜底：改 host executable 模板
+          # ========================================================
+          # 兜底：host 构建模板追加 -lpcre（只影响 host，不影响 target）
+          # ========================================================
           F=build/core/host_executable_internal.mk
-          cp $F $F.bak
-          sed -i 's/\$(PRIVATE_LDLIBS)/$(PRIVATE_LDLIBS) -lpcre/g' $F
+          if [ -f "$F" ] && ! grep -q "lpcre" "$F"; then
+            cp $F $F.bak
+            sed -i 's/\$(PRIVATE_LDLIBS)/$(PRIVATE_LDLIBS) -lpcre/g' $F
+            echo "===== $F ====="
+            grep -n "lpcre" $F || true
+          fi
 
       - name: Patch checkpolicy for modern GCC
         run: |
