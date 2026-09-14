@@ -114,18 +114,18 @@ jobs:
             sed -i '/^LOCAL_MODULE/a LOCAL_CFLAGS := -fcommon' external/checkpolicy/Android.mk
           fi
 
-      - name: Patch recovery to use C++11 (C++ only)
+      - name: Patch recovery for C++11
         run: |
           cd ~/twrp
 
-          # 1) 把 recovery 模块里唯一的 .c 文件改名为 .cpp（避免 -std=gnu++11 应用于 C）
-          if [ -f bootable/recovery/tarWrite.c ]; then
-            mv bootable/recovery/tarWrite.c bootable/recovery/tarWrite.cpp
-            sed -i 's/tarWrite\.c/tarWrite.cpp/g' bootable/recovery/Android.mk
-            echo "Renamed tarWrite.c -> tarWrite.cpp"
+          # 撤销上一轮的错误改名（如果存在），保持 tarWrite.c 为 C 文件
+          if [ -f bootable/recovery/tarWrite.cpp ]; then
+            mv bootable/recovery/tarWrite.cpp bootable/recovery/tarWrite.c
+            sed -i 's/tarWrite\.cpp/tarWrite.c/g' bootable/recovery/Android.mk
+            echo "Reverted tarWrite.cpp -> tarWrite.c"
           fi
 
-          # 2) 只给 C++ 加 -std=gnu++11，不动 C
+          # 只给 C++ 加 -std=gnu++11，不碰 C 文件
           if ! grep -q "std=gnu++11" bootable/recovery/Android.mk; then
             sed -i '/^LOCAL_MODULE := recovery/a LOCAL_CPPFLAGS += -std=gnu++11' bootable/recovery/Android.mk
           fi
