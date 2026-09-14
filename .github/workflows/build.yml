@@ -80,32 +80,35 @@ jobs:
           mkdir -p device/leadcore/lte26007
           cp -r $GITHUB_WORKSPACE/src/device/leadcore/lte26007/* device/leadcore/lte26007/
 
-      - name: Fix libselinux pcre linking (only host block)
+      - name: Universal fix - add libpcre to all host tools using libselinux
         run: |
           cd ~/twrp
-          FILE=external/libselinux/Android.mk
-          echo "===== Original ====="
-          cat $FILE
 
-          # 只修改 HOST 块里的 WHOLE -> static，target 块保留 WHOLE
-          HOST_BUILD_LINE=$(grep -n "BUILD_HOST_STATIC_LIBRARY" $FILE | head -1 | cut -d: -f1)
-          if [ -n "$HOST_BUILD_LINE" ]; then
-            HOST_START=$(head -n $HOST_BUILD_LINE $FILE | grep -n "include \$(CLEAR_VARS)" | tail -1 | cut -d: -f1)
-            echo "Host block: lines $HOST_START to $HOST_BUILD_LINE"
-            sed -i "${HOST_START},${HOST_BUILD_LINE}s/LOCAL_WHOLE_STATIC_LIBRARIES \(:=\|+=\) libpcre/LOCAL_STATIC_LIBRARIES \1 libpcre/" $FILE
-          fi
-
-          # host 工具补 libpcre
-          for f in $(find external/libselinux -name Android.mk); do
-            if grep -q "BUILD_HOST_EXECUTABLE" "$f"; then
-              if ! grep -q "^LOCAL_STATIC_LIBRARIES.*libpcre" "$f"; then
-                echo "Patching host tool: $f"
-                sed -i '/include \$(BUILD_HOST_EXECUTABLE)/i LOCAL_STATIC_LIBRARIES += libpcre' "$f"
+          # 1) 全树扫描所有含 BUILD_HOST_EXECUTABLE 的 Android.mk
+          #    只要它引用了 libselinux，就在 LOCAL_STATIC_LIBRARIES 里补 libpcre
+          echo "===== Patching host tools ====="
+          for f in $(grep -rl "BUILD_HOST_EXECUTABLE" --include=Android.mk . 2>/dev/null | grep -v "^./out"); do
+            if grep -q "libselinux" "$f" && ! grep -q "libpcre" "$f"; then
+              echo "  -> $f"
+              if grep -qE "^LOCAL_STATIC_LIBRARIES" "$f"; then
+                sed -i 's/^LOCAL_STATIC_LIBRARIES \(:=\|+=\)/LOCAL_STATIC_LIBRARIES \1 libpcre/' "$f"
+              else
+                sed -i '/include \$(BUILD_HOST_EXECUTABLE)/i LOCAL_STATIC_LIBRARIES := libpcre' "$f"
               fi
             fi
           done
 
-          echo "===== After ====="
+          # 2) libselinux 主库的 host 块：WHOLE 改成 static（避免 5.1 host 路径拼接 bug）
+          FILE=external/libselinux/Android.mk
+          HOST_BUILD_LINE=$(grep -n "BUILD_HOST_STATIC_LIBRARY" $FILE | head -1 | cut -d: -f1)
+          if [ -n "$HOST_BUILD_LINE" ]; then
+            HOST_START=$(head -n $HOST_BUILD_LINE $FILE | grep -n "include \$(CLEAR_VARS)" | tail -1 | cut -d: -f1)
+            echo "  host block: lines $HOST_START - $HOST_BUILD_LINE"
+            sed -i "${HOST_START},${HOST_BUILD_LINE}s/LOCAL_WHOLE_STATIC_LIBRARIES \(:=\|+=\) libpcre/LOCAL_STATIC_LIBRARIES \1 libpcre/" $FILE
+          fi
+
+          # 3) 打印结果确认
+          echo "===== libselinux/Android.mk ====="
           cat $FILE
 
       - name: Patch checkpolicy for modern GCC
@@ -117,8 +120,6 @@ jobs:
           else
             sed -i '/^LOCAL_MODULE/a LOCAL_CFLAGS := -fcommon' external/checkpolicy/Android.mk
           fi
-          echo "===== checkpolicy Android.mk ====="
-          cat external/checkpolicy/Android.mk
 
       - name: Build recovery
         run: |
