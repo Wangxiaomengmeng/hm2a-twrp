@@ -37,12 +37,15 @@ jobs:
           distribution: 'zulu'
           java-version: '8'
 
-      - name: Install Python 2.7 and system libpcre
+      - name: Install Python 2.7 and 32-bit system libpcre
         run: |
           sudo add-apt-repository -y ppa:deadsnakes/ppa
+          sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y python2.7 libpcre3-dev
+          sudo apt-get install -y python2.7 libpcre3-dev libpcre3-dev:i386
           sudo ln -sf /usr/bin/python2.7 /usr/bin/python
+          echo "=== 32-bit libpcre check ==="
+          ls -l /usr/lib/i386-linux-gnu/libpcre* || true
 
       - name: Install build deps
         run: |
@@ -84,15 +87,14 @@ jobs:
         run: |
           cd ~/twrp
 
-          # 1) libselinux 主库：去掉对 AOSP libpcre 的依赖
+          # libselinux 主库：去掉对 AOSP libpcre 的依赖
           FILE=external/libselinux/Android.mk
           sed -i 's/LOCAL_WHOLE_STATIC_LIBRARIES \(:=\|+=\) libpcre//g' $FILE
           sed -i 's/LOCAL_STATIC_LIBRARIES \(:=\|+=\) libpcre//g' $FILE
 
-          # 2) 所有 host 工具：删掉对 AOSP libpcre 的引用，改成链接系统 libpcre
+          # 所有 host 工具：加 -lpcre
           for f in $(grep -rl "BUILD_HOST_EXECUTABLE" --include=Android.mk . | grep -v "^./out"); do
             if grep -q "libselinux\|libpcre" "$f"; then
-              echo "  patch -> $f"
               sed -i '/LOCAL_STATIC_LIBRARIES.*libpcre/d' "$f"
               sed -i '/LOCAL_WHOLE_STATIC_LIBRARIES.*libpcre/d' "$f"
               if ! grep -q "LOCAL_LDLIBS.*lpcre" "$f"; then
@@ -101,25 +103,10 @@ jobs:
             fi
           done
 
-          # 3) 暴力兜底：直接改 host executable 模板，所有 host 工具都加 -lpcre
+          # 兜底：改 host executable 模板
           F=build/core/host_executable_internal.mk
           cp $F $F.bak
           sed -i 's/\$(PRIVATE_LDLIBS)/$(PRIVATE_LDLIBS) -lpcre/g' $F
-          echo "===== host_executable_internal.mk (lpcre lines) ====="
-          grep -n "lpcre" $F || echo "(no match, will check alternative template)"
-
-          # 4) 如果上面没匹配到，改另一个模板
-          for F in build/core/host_executable.mk build/core/host_executable_internal.mk; do
-            if [ -f "$F" ] && ! grep -q "lpcre" "$F"; then
-              cp $F $F.bak
-              sed -i 's/\$(PRIVATE_LDLIBS)/$(PRIVATE_LDLIBS) -lpcre/g' $F
-              echo "===== $F ====="
-              grep -n "lpcre" $F || true
-            fi
-          done
-
-          echo "===== external/libselinux/Android.mk ====="
-          cat external/libselinux/Android.mk
 
       - name: Patch checkpolicy for modern GCC
         run: |
