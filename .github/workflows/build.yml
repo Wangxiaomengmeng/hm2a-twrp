@@ -1,4 +1,4 @@
-name: Build TWRP lte26007 (4.4)
+name: Build PhilZ Touch lte26007
 
 on:
   workflow_dispatch:
@@ -66,51 +66,39 @@ jobs:
       - name: Cache repo sync
         uses: actions/cache@v4
         with:
-          path: ~/twrp/.repo
-          key: twrp-4.4-dep-repo-${{ hashFiles('src/device/leadcore/lte26007/BoardConfig.mk') }}
+          path: ~/cm11/.repo
+          key: cm-11.0-repo-${{ hashFiles('src/device/leadcore/lte26007/BoardConfig.mk') }}
 
       - name: Init and sync minimal manifest
         run: |
-          mkdir -p ~/twrp && cd ~/twrp
-          repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-4.4-deprecated
+          mkdir -p ~/cm11 && cd ~/cm11
+          repo init --depth=1 -u https://github.com/CyanogenMod/android.git -b cm-11.0
           repo sync -c --no-clone-bundle --no-tags -j$(nproc)
 
-      - name: Fetch missing mksh source
+      - name: Setup local manifests for PhilZ Touch
         run: |
-          cd ~/twrp
-          MIRRORS=(
-            "https://github.com/CyanogenMod/android_external_mksh.git"
-            "https://android.googlesource.com/platform/external/mksh"
-          )
-          SUCCESS=0
-          for m in "${MIRRORS[@]}"; do
-            if git clone --depth=1 "$m" external/mksh 2>/dev/null; then
-              SUCCESS=1; echo "Cloned from $m"; break
-            fi
-            rm -rf external/mksh
-          done
-          [ "$SUCCESS" = "1" ] || { echo "mksh clone failed"; exit 1; }
-
-      - name: Patch mksh module name
-        run: |
-          cd ~/twrp
-          sed -i 's/^LOCAL_MODULE := sh/LOCAL_MODULE := mksh/' external/mksh/Android.mk
-          sed -i 's/^LOCAL_MODULE:=sh/LOCAL_MODULE := mksh/' external/mksh/Android.mk
+          cd ~/cm11
+          mkdir -p .repo/local_manifests
+          cat > .repo/local_manifests/philz.xml << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <manifest>
+            <remote name="philz" fetch="https://github.com/" />
+            <remove-project name="CyanogenMod/android_bootable_recovery" />
+            <project path="bootable/recovery" name="PhilZ-cwm6/philz_touch_cwm6" remote="philz" revision="cm-11.0" />
+          </manifest>
+          EOF
+          # 重新同步，让本地清单生效
+          repo sync -c --no-clone-bundle --no-tags -j$(nproc)
 
       - name: Drop in device tree and kernel
         run: |
-          cd ~/twrp
+          cd ~/cm11
           mkdir -p device/leadcore/lte26007
           cp -r $GITHUB_WORKSPACE/src/device/leadcore/lte26007/* device/leadcore/lte26007/
 
-      - name: Patch AOSP 4.4 JDK checks
-        run: |
-          cd ~/twrp
-          sed -i 's/\$(error stop)/\$(info JDK check bypassed)/g' build/core/main.mk
-
       - name: Patch checkpolicy for modern GCC
         run: |
-          cd ~/twrp
+          cd ~/cm11
           if grep -q "LOCAL_CFLAGS" external/checkpolicy/Android.mk; then
             sed -i 's/^LOCAL_CFLAGS +=/LOCAL_CFLAGS += -fcommon/' external/checkpolicy/Android.mk
             sed -i 's/^LOCAL_CFLAGS :=/LOCAL_CFLAGS := -fcommon/' external/checkpolicy/Android.mk
@@ -120,7 +108,7 @@ jobs:
 
       - name: Patch libselinux pcre linking
         run: |
-          cd ~/twrp
+          cd ~/cm11
           FILE=external/libselinux/Android.mk
           HOST_BUILD_LINE=$(grep -n "BUILD_HOST_STATIC_LIBRARY" $FILE | head -1 | cut -d: -f1)
           if [ -n "$HOST_BUILD_LINE" ]; then
@@ -133,61 +121,29 @@ jobs:
             fi
           done
 
-      - name: Patch host clang warnings and std::data
-        run: |
-          cd ~/twrp
-
-          # 1) 关闭 GCC 11 的 class-memaccess 错误
-          for f in $(find external/clang external/llvm -name "Android.mk"); do
-            if ! grep -q "class-memaccess" "$f"; then
-              sed -i 's/^LOCAL_CFLAGS :=/LOCAL_CFLAGS := -Wno-error=class-memaccess -Wno-class-memaccess/' "$f"
-              sed -i 's/^LOCAL_CFLAGS +=/LOCAL_CFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess/' "$f"
-              sed -i 's/^LOCAL_CXXFLAGS :=/LOCAL_CXXFLAGS := -Wno-error=class-memaccess -Wno-class-memaccess/' "$f"
-              sed -i 's/^LOCAL_CXXFLAGS +=/LOCAL_CXXFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess/' "$f"
-              if ! grep -q "class-memaccess" "$f"; then
-                sed -i '/^LOCAL_MODULE/a LOCAL_CFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess' "$f"
-              fi
-            fi
-          done
-          for f in build/core/combo/HOST_linux-x86.mk build/core/combo/HOST_linux-x86_64.mk; do
-            if [ -f "$f" ]; then
-              echo "HOST_GLOBAL_CFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess" >> "$f"
-              echo "HOST_GLOBAL_CPPFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess" >> "$f"
-            fi
-          done
-
-          # 2) 修 std::data 与成员函数 data() 的 ADL 冲突
-          #    把 data(Foo) 改成 Foo.data()，只匹配简单标识符参数
-          F=external/clang/lib/Serialization/ASTWriter.cpp
-          echo "=== Before ==="
-          grep -n "[^.]data(" $F | head -20 || true
-          sed -i -E 's/([^.:a-zA-Z_])data\(([A-Za-z_][A-Za-z0-9_]*)\)/\1\2.data()/g' $F
-          echo "=== After ==="
-          grep -n "data(" $F | head -20 || true
-
       - name: Build recovery
         run: |
-          cd ~/twrp
+          cd ~/cm11
           source build/envsetup.sh
-          lunch omni_lte26007-eng
-          mka recoveryimage -j$(nproc) 2>&1 | tee build.log || true
+          lunch cm_lte26007-eng
+          mka -j$(nproc) recoveryimage RECOVERY_VARIANT=philz 2>&1 | tee build.log || true
           ls -la out/target/product/lte26007/recovery/root/ || true
 
       - name: Repack ramdisk_recovery (gzip cpio)
         if: always()
         run: |
-          cd ~/twrp/out/target/product/lte26007/recovery/root
+          cd ~/cm11/out/target/product/lte26007/recovery/root
           find . | cpio -o -H newc | gzip -9 > $GITHUB_WORKSPACE/ramdisk_recovery.img
           ls -l $GITHUB_WORKSPACE/ramdisk_recovery.img
           echo "size = $(stat -c%s $GITHUB_WORKSPACE/ramdisk_recovery.img) bytes"
 
-      - name: Upload ramdisk + recovery.img + build log
+      - name: Upload ramdisk + build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: twrp-lte26007-44
+          name: philz-lte26007
           path: |
             ramdisk_recovery.img
-            /home/runner/twrp/out/target/product/lte26007/recovery.img
-            /home/runner/twrp/out/target/product/lte26007/ramdisk-recovery.img
-            /home/runner/twrp/build.log
+            /home/runner/cm11/out/target/product/lte26007/recovery.img
+            /home/runner/cm11/out/target/product/lte26007/ramdisk-recovery.img
+            /home/runner/cm11/build.log
