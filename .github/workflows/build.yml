@@ -1,4 +1,4 @@
-name: Build TWRP lte26007
+name: Build TWRP lte26007 (4.4)
 
 on:
   workflow_dispatch:
@@ -31,11 +31,11 @@ jobs:
           echo "After:"
           df -h
 
-      - name: Setup JDK 8
+      - name: Setup JDK 7 (Android 4.4 era)
         uses: actions/setup-java@v3
         with:
           distribution: 'zulu'
-          java-version: '8'
+          java-version: '7'
 
       - name: Install Python 2.7 and 32-bit system libpcre
         run: |
@@ -44,7 +44,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python2.7 libpcre3-dev libpcre3-dev:i386
           sudo ln -sf /usr/bin/python2.7 /usr/bin/python
-          ls -l /usr/lib/i386-linux-gnu/libpcre* || true
 
       - name: Install build deps
         run: |
@@ -68,13 +67,36 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/twrp/.repo
-          key: twrp-5.1-repo-${{ hashFiles('src/device/leadcore/lte26007/BoardConfig.mk') }}
+          key: twrp-4.4-dep-repo-${{ hashFiles('src/device/leadcore/lte26007/BoardConfig.mk') }}
 
       - name: Init and sync minimal manifest
         run: |
           mkdir -p ~/twrp && cd ~/twrp
-          repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-5.1
+          repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-4.4-deprecated
           repo sync -c --no-clone-bundle --no-tags -j$(nproc)
+
+      - name: Fetch missing mksh source
+        run: |
+          cd ~/twrp
+          MIRRORS=(
+            "https://github.com/CyanogenMod/android_external_mksh.git"
+            "https://android.googlesource.com/platform/external/mksh"
+          )
+          SUCCESS=0
+          for m in "${MIRRORS[@]}"; do
+            if git clone --depth=1 "$m" external/mksh 2>/dev/null; then
+              SUCCESS=1; echo "Cloned from $m"; break
+            fi
+            rm -rf external/mksh
+          done
+          [ "$SUCCESS" = "1" ] || { echo "mksh clone failed"; exit 1; }
+
+      - name: Patch mksh module name
+        run: |
+          cd ~/twrp
+          sed -i 's/^LOCAL_MODULE := sh/LOCAL_MODULE := mksh/' external/mksh/Android.mk
+          sed -i 's/^LOCAL_MODULE:=sh/LOCAL_MODULE := mksh/' external/mksh/Android.mk
+          grep -n "LOCAL_MODULE" external/mksh/Android.mk
 
       - name: Drop in device tree and kernel
         run: |
@@ -82,27 +104,11 @@ jobs:
           mkdir -p device/leadcore/lte26007
           cp -r $GITHUB_WORKSPACE/src/device/leadcore/lte26007/* device/leadcore/lte26007/
 
-      - name: Fix libpcre (only host block in libselinux)
+      - name: Patch AOSP 4.4 JDK checks
         run: |
           cd ~/twrp
-          FILE=external/libselinux/Android.mk
-          HOST_BUILD_LINE=$(grep -n "BUILD_HOST_STATIC_LIBRARY" $FILE | head -1 | cut -d: -f1)
-          if [ -n "$HOST_BUILD_LINE" ]; then
-            HOST_START=$(head -n $HOST_BUILD_LINE $FILE | grep -n "include \$(CLEAR_VARS)" | tail -1 | cut -d: -f1)
-            sed -i "${HOST_START},${HOST_BUILD_LINE}s/LOCAL_WHOLE_STATIC_LIBRARIES \(:=\|+=\) libpcre/LOCAL_STATIC_LIBRARIES \1 libpcre/" $FILE
-          fi
-          for f in $(grep -rl "BUILD_HOST_EXECUTABLE" --include=Android.mk . | grep -v "^./out"); do
-            if grep -q "libselinux" "$f"; then
-              if ! grep -q "LOCAL_LDLIBS.*lpcre" "$f"; then
-                sed -i '/include \$(BUILD_HOST_EXECUTABLE)/i LOCAL_LDLIBS += -lpcre' "$f"
-              fi
-            fi
-          done
-          F=build/core/host_executable_internal.mk
-          if [ -f "$F" ] && ! grep -q "lpcre" "$F"; then
-            cp $F $F.bak
-            sed -i 's/\$(PRIVATE_LDLIBS)/$(PRIVATE_LDLIBS) -lpcre/g' $F
-          fi
+          sed -i 's/\$(error stop)/\$(info JDK check bypassed)/g' build/core/main.mk
+          grep -n "error stop" build/core/main.mk || echo "JDK checks disabled"
 
       - name: Patch checkpolicy for modern GCC
         run: |
@@ -114,24 +120,51 @@ jobs:
             sed -i '/^LOCAL_MODULE/a LOCAL_CFLAGS := -fcommon' external/checkpolicy/Android.mk
           fi
 
-      - name: Patch recovery for C++11
+      - name: Patch libselinux pcre linking
         run: |
           cd ~/twrp
-
-          # 撤销上一轮的错误改名（如果存在），保持 tarWrite.c 为 C 文件
-          if [ -f bootable/recovery/tarWrite.cpp ]; then
-            mv bootable/recovery/tarWrite.cpp bootable/recovery/tarWrite.c
-            sed -i 's/tarWrite\.cpp/tarWrite.c/g' bootable/recovery/Android.mk
-            echo "Reverted tarWrite.cpp -> tarWrite.c"
+          FILE=external/libselinux/Android.mk
+          HOST_BUILD_LINE=$(grep -n "BUILD_HOST_STATIC_LIBRARY" $FILE | head -1 | cut -d: -f1)
+          if [ -n "$HOST_BUILD_LINE" ]; then
+            HOST_START=$(head -n $HOST_BUILD_LINE $FILE | grep -n "include \$(CLEAR_VARS)" | tail -1 | cut -d: -f1)
+            sed -i "${HOST_START},${HOST_BUILD_LINE}s/LOCAL_WHOLE_STATIC_LIBRARIES \(:=\|+=\) libpcre/LOCAL_STATIC_LIBRARIES \1 libpcre/" $FILE
           fi
+          for f in $(grep -rl "BUILD_HOST_EXECUTABLE" --include=Android.mk . | grep -v "^./out"); do
+            if grep -q "libselinux" "$f" && ! grep -q "LOCAL_LDLIBS.*lpcre" "$f"; then
+              sed -i '/include \$(BUILD_HOST_EXECUTABLE)/i LOCAL_LDLIBS += -lpcre' "$f"
+            fi
+          done
 
-          # 只给 C++ 加 -std=gnu++11，不碰 C 文件
-          if ! grep -q "std=gnu++11" bootable/recovery/Android.mk; then
-            sed -i '/^LOCAL_MODULE := recovery/a LOCAL_CPPFLAGS += -std=gnu++11' bootable/recovery/Android.mk
+      - name: Patch host clang for GCC 11 (class-memaccess error)
+        run: |
+          cd ~/twrp
+          # 上一轮 4.4 就是死在 external/clang/lib/Serialization/ASTWriter.cpp
+          # GCC 11 把它当成 error，我们给 clang 模块的所有 CFLAGS 关掉这个警告
+          echo "=== Patching external/clang ==="
+          for f in $(find external/clang external/llvm -name "Android.mk"); do
+            if ! grep -q "class-memaccess" "$f"; then
+              # 在 LOCAL_CFLAGS 或 LOCAL_CXXFLAGS 里追加
+              sed -i 's/^LOCAL_CFLAGS :=/LOCAL_CFLAGS := -Wno-error=class-memaccess -Wno-class-memaccess/' "$f"
+              sed -i 's/^LOCAL_CFLAGS +=/LOCAL_CFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess/' "$f"
+              sed -i 's/^LOCAL_CXXFLAGS :=/LOCAL_CXXFLAGS := -Wno-error=class-memaccess -Wno-class-memaccess/' "$f"
+              sed -i 's/^LOCAL_CXXFLAGS +=/LOCAL_CXXFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess/' "$f"
+              # 若上面都没有，就在 LOCAL_MODULE 后面加
+              if ! grep -q "class-memaccess" "$f"; then
+                sed -i '/^LOCAL_MODULE/a LOCAL_CFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess' "$f"
+              fi
+            fi
+          done
+
+          # 终极兜底：全局 CFLAGS 都关掉
+          if [ -f build/core/combo/HOST_linux-x86.mk ]; then
+            grep -q "class-memaccess" build/core/combo/HOST_linux-x86.mk || \
+              echo "HOST_GLOBAL_CFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess" >> build/core/combo/HOST_linux-x86.mk
+            echo "HOST_GLOBAL_CPPFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess" >> build/core/combo/HOST_linux-x86.mk
           fi
-
-          echo "===== bootable/recovery/Android.mk (final) ====="
-          grep -n "tarWrite\|std=gnu++11\|LOCAL_MODULE := recovery" bootable/recovery/Android.mk || true
+          if [ -f build/core/combo/HOST_linux-x86_64.mk ]; then
+            echo "HOST_GLOBAL_CFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess" >> build/core/combo/HOST_linux-x86_64.mk
+            echo "HOST_GLOBAL_CPPFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess" >> build/core/combo/HOST_linux-x86_64.mk
+          fi
 
       - name: Build recovery
         run: |
@@ -149,12 +182,13 @@ jobs:
           ls -l $GITHUB_WORKSPACE/ramdisk_recovery.img
           echo "size = $(stat -c%s $GITHUB_WORKSPACE/ramdisk_recovery.img) bytes"
 
-      - name: Upload ramdisk + build log
+      - name: Upload ramdisk + recovery.img + build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: twrp-lte26007
+          name: twrp-lte26007-44
           path: |
             ramdisk_recovery.img
             /home/runner/twrp/out/target/product/lte26007/recovery.img
+            /home/runner/twrp/out/target/product/lte26007/ramdisk-recovery.img
             /home/runner/twrp/build.log
