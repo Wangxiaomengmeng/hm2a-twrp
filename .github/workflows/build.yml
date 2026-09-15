@@ -96,7 +96,6 @@ jobs:
           cd ~/twrp
           sed -i 's/^LOCAL_MODULE := sh/LOCAL_MODULE := mksh/' external/mksh/Android.mk
           sed -i 's/^LOCAL_MODULE:=sh/LOCAL_MODULE := mksh/' external/mksh/Android.mk
-          grep -n "LOCAL_MODULE" external/mksh/Android.mk
 
       - name: Drop in device tree and kernel
         run: |
@@ -108,7 +107,6 @@ jobs:
         run: |
           cd ~/twrp
           sed -i 's/\$(error stop)/\$(info JDK check bypassed)/g' build/core/main.mk
-          grep -n "error stop" build/core/main.mk || echo "JDK checks disabled"
 
       - name: Patch checkpolicy for modern GCC
         run: |
@@ -135,36 +133,37 @@ jobs:
             fi
           done
 
-      - name: Patch host clang for GCC 11 (class-memaccess error)
+      - name: Patch host clang warnings and std::data
         run: |
           cd ~/twrp
-          # 上一轮 4.4 就是死在 external/clang/lib/Serialization/ASTWriter.cpp
-          # GCC 11 把它当成 error，我们给 clang 模块的所有 CFLAGS 关掉这个警告
-          echo "=== Patching external/clang ==="
+
+          # 1) 关闭 GCC 11 的 class-memaccess 错误
           for f in $(find external/clang external/llvm -name "Android.mk"); do
             if ! grep -q "class-memaccess" "$f"; then
-              # 在 LOCAL_CFLAGS 或 LOCAL_CXXFLAGS 里追加
               sed -i 's/^LOCAL_CFLAGS :=/LOCAL_CFLAGS := -Wno-error=class-memaccess -Wno-class-memaccess/' "$f"
               sed -i 's/^LOCAL_CFLAGS +=/LOCAL_CFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess/' "$f"
               sed -i 's/^LOCAL_CXXFLAGS :=/LOCAL_CXXFLAGS := -Wno-error=class-memaccess -Wno-class-memaccess/' "$f"
               sed -i 's/^LOCAL_CXXFLAGS +=/LOCAL_CXXFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess/' "$f"
-              # 若上面都没有，就在 LOCAL_MODULE 后面加
               if ! grep -q "class-memaccess" "$f"; then
                 sed -i '/^LOCAL_MODULE/a LOCAL_CFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess' "$f"
               fi
             fi
           done
+          for f in build/core/combo/HOST_linux-x86.mk build/core/combo/HOST_linux-x86_64.mk; do
+            if [ -f "$f" ]; then
+              echo "HOST_GLOBAL_CFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess" >> "$f"
+              echo "HOST_GLOBAL_CPPFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess" >> "$f"
+            fi
+          done
 
-          # 终极兜底：全局 CFLAGS 都关掉
-          if [ -f build/core/combo/HOST_linux-x86.mk ]; then
-            grep -q "class-memaccess" build/core/combo/HOST_linux-x86.mk || \
-              echo "HOST_GLOBAL_CFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess" >> build/core/combo/HOST_linux-x86.mk
-            echo "HOST_GLOBAL_CPPFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess" >> build/core/combo/HOST_linux-x86.mk
-          fi
-          if [ -f build/core/combo/HOST_linux-x86_64.mk ]; then
-            echo "HOST_GLOBAL_CFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess" >> build/core/combo/HOST_linux-x86_64.mk
-            echo "HOST_GLOBAL_CPPFLAGS += -Wno-error=class-memaccess -Wno-class-memaccess" >> build/core/combo/HOST_linux-x86_64.mk
-          fi
+          # 2) 修 std::data 与成员函数 data() 的 ADL 冲突
+          #    把 data(Foo) 改成 Foo.data()，只匹配简单标识符参数
+          F=external/clang/lib/Serialization/ASTWriter.cpp
+          echo "=== Before ==="
+          grep -n "[^.]data(" $F | head -20 || true
+          sed -i -E 's/([^.:a-zA-Z_])data\(([A-Za-z_][A-Za-z0-9_]*)\)/\1\2.data()/g' $F
+          echo "=== After ==="
+          grep -n "data(" $F | head -20 || true
 
       - name: Build recovery
         run: |
