@@ -67,15 +67,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/cm11/.repo
-          key: cm-11.0-repo-${{ hashFiles('src/device/leadcore/lte26007/BoardConfig.mk') }}
+          key: cm-11.0-philz-repo-${{ hashFiles('src/device/leadcore/lte26007/BoardConfig.mk') }}
 
-      - name: Init and sync minimal manifest
+      - name: Repo init
         run: |
           mkdir -p ~/cm11 && cd ~/cm11
           repo init --depth=1 -u https://github.com/CyanogenMod/android.git -b cm-11.0
-          repo sync -c --no-clone-bundle --no-tags -j$(nproc)
 
-      - name: Setup local manifests for PhilZ Touch
+      - name: Add PhilZ Touch to local_manifests (BEFORE sync)
         run: |
           cd ~/cm11
           mkdir -p .repo/local_manifests
@@ -87,8 +86,12 @@ jobs:
             <project path="bootable/recovery" name="PhilZ-cwm6/philz_touch_cwm6" remote="philz" revision="cm-11.0" />
           </manifest>
           EOF
-          # 重新同步，让本地清单生效
-          repo sync -c --no-clone-bundle --no-tags -j$(nproc)
+          cat .repo/local_manifests/philz.xml
+
+      - name: Repo sync (with local_manifest already in place)
+        run: |
+          cd ~/cm11
+          repo sync -c --no-clone-bundle --no-tags --force-sync -j$(nproc)
 
       - name: Drop in device tree and kernel
         run: |
@@ -132,7 +135,7 @@ jobs:
       - name: Repack ramdisk_recovery (gzip cpio)
         if: always()
         run: |
-          cd ~/cm11/out/target/product/lte26007/recovery/root
+          cd ~/cm11/out/target/product/lte26007/recovery/root 2>/dev/null || exit 0
           find . | cpio -o -H newc | gzip -9 > $GITHUB_WORKSPACE/ramdisk_recovery.img
           ls -l $GITHUB_WORKSPACE/ramdisk_recovery.img
           echo "size = $(stat -c%s $GITHUB_WORKSPACE/ramdisk_recovery.img) bytes"
